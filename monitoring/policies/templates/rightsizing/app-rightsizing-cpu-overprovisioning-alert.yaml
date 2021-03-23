@@ -1,0 +1,92 @@
+# Copyright 2021 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+combiner: OR
+conditions:
+- conditionMonitoringQueryLanguage:
+    #duration: 338400s #4 days - required to avoid VPA recommendations to get low during weekends
+    duration: 84600s #1 day
+    #duration: 60s    #1 minute 
+    query: |-
+        { namespace_request_cores:
+            fetch k8s_container
+            | metric 'kubernetes.io/container/cpu/request_cores'
+            | filter
+                (resource.cluster_name == 'CLUSTER_TO_REPLACE'
+                && resource.namespace_name == 'NAMESPACE_TO_REPLACE')
+            | group_by 1m, [value_request_cores_mean: mean(value.request_cores)]
+            | every 1m
+            | group_by [cluster_name: resource.cluster_name, controller_name:metadata.system_labels.top_level_controller_name],
+                [value: sum(value_request_cores_mean)]
+
+        ; namespace_recommended_cores:
+
+            { recommendation:
+                { vpa:
+                    fetch k8s_container
+                    | metric 'custom.googleapis.com/podautoscaler/vpa/cpu/target_recommendation'
+                    | filter 
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE'
+                        && resource.namespace_name == 'NAMESPACE_TO_REPLACE')
+                    | group_by 1m, [value_cpu_mean: mean(value.target_recommendation)]
+                    | every 1m
+                    | group_by [cluster_name: resource.cluster_name, kind:metric.targetref_kind, controller_name:metric.targetref_name],
+                        [recommendation: sum(value_cpu_mean)]
+                ; hpa:
+                    fetch k8s_pod
+                    | metric 'custom.googleapis.com/podautoscaler/hpa/cpu/target_utilization'
+                    | filter 
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE'
+                        && resource.namespace_name == 'NAMESPACE_TO_REPLACE')
+                    | group_by 1m, [value_cpu_mean: mean(value.target_utilization)]
+                    | every 1m
+                    | group_by [cluster_name: resource.cluster_name, kind:metric.targetref_kind, controller_name:metric.targetref_name],
+                        [target: mean(value_cpu_mean)]
+                }
+                | outer_join [0],[0]
+                | value [recommendation: vpa.recommendation + (if( gt(hpa.target,0),  vpa.recommendation * (100 - hpa.target) / 100,  cast_double(0) )) ]
+                | group_by [cluster_name, controller_name], 
+                    [per_controler_name: cast_units(mean(recommendation), "{cpu}")]
+            
+            ; number_of_pods:
+                fetch k8s_pod
+                | metric 'kubernetes.io/pod/volume/total_bytes'
+                | filter
+                    (resource.cluster_name == 'CLUSTER_TO_REPLACE'
+                    && resource.namespace_name == 'NAMESPACE_TO_REPLACE')
+                | group_by 1m, [sent_bytes_mean: mean(value.total_bytes)]
+                | every 1m
+                | group_by [cluster_name:resource.cluster_name, controller_name:metadata.system_labels.top_level_controller_name],
+                        [per_controller_name:count(sent_bytes_mean)]
+            }
+            | join
+            | group_by [cluster_name, controller_name],
+                [value:sum(recommendation.per_controler_name * number_of_pods.per_controller_name)]
+
+        }
+        | join
+        | value [app_overprovisioned_perc:cast_units(100 - (100 * namespace_recommended_cores.value / namespace_request_cores.value), '%')]
+        | window 10m
+        | condition app_overprovisioned_perc > cast_units(80, '%') 
+    trigger:
+      count: 1
+  displayName: 'APP CPU OVER-PROVISIONED BY 80%'
+displayName: 'APP RIGHT SIZING: CPU OVER-PROVISIONING ALERT (CLUSTER_TO_REPLACE:NAMESPACE_TO_REPLACE)'  
+documentation:
+  content: |-
+    CONSIDER USING RIGHT SIZING RECOMMENDATIONS
+
+    You can see RIGHT SIZING recommendation in **Cloud Monitoring -> Dashboards -> GKE - App Right Sizing (CLUSTER_TO_REPLACE:NAMESPACE_TO_REPLACE)**
+  mimeType: text/markdown
+enabled: true

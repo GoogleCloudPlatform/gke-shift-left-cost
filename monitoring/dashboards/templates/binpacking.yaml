@@ -1,0 +1,594 @@
+# Copyright 2021 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+displayName: GKE - Cluster Bin Packing (CLUSTER_TO_REPLACE)
+mosaicLayout:
+  columns: 12
+  tiles:
+  - widget:
+      title: 'CPU: Per cluster'
+      xyChart:
+        chartOptions:
+          mode: COLOR
+        dataSets:
+        - plotType: LINE
+          timeSeriesQuery:
+            timeSeriesQueryLanguage: |-              
+              { cluster_allocatable_cores:
+                  {
+                    fetch k8s_node
+                    | metric 'kubernetes.io/node/cpu/allocatable_cores'
+                    | filter
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE')                    
+                    | group_by 10m, [value_allocatable_cores_sum: mean(value.allocatable_cores)]
+                    | every 10m
+                    | group_by [cluster_name:resource.cluster_name],
+                        [sum_value:sum(value_allocatable_cores_sum)]
+                    ;
+                    fetch k8s_container
+                    | metric 'kubernetes.io/container/cpu/request_cores'
+                    | filter
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE')
+                    | group_by 10m, [value_request_cores_sum: mean(value.request_cores)]
+                    | every 10m
+                    | group_by [cluster_name:resource.cluster_name],
+                        [sum_hack:sum(value_request_cores_sum)]
+                  }
+                  | join
+                  | group_by [cluster_name, metric:"allocatable_cores"],
+                      [sum_value:sum(sum_value)]
+                      
+              ; cluster_request_cores:
+                    fetch k8s_container
+                    | metric 'kubernetes.io/container/cpu/request_cores'
+                    | filter
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE')                  
+                    | group_by 10m, [value_request_cores_mean: mean(value.request_cores)]
+                    | every 10m
+                    | group_by [cluster_name: resource.cluster_name, metric: 'request_cores'],
+                        [sum_value: sum(value_request_cores_mean)]
+
+              ; cluster_used_cores:
+                    fetch k8s_container
+                    | metric 'kubernetes.io/container/cpu/core_usage_time'
+                    | filter
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE')                  
+                    | align rate(10m)
+                    | every 10m
+                    | group_by [cluster_name: resource.cluster_name, metric: 'used_cores'],
+                        [sum_value: sum(value.core_usage_time)]
+
+              ; cluster_recommended_cores:
+                    { recommendation:
+                        { vpa:
+                          fetch k8s_container
+                          | metric 'custom.googleapis.com/podautoscaler/vpa/cpu/target_recommendation'
+                          | filter 
+                              (resource.cluster_name == 'CLUSTER_TO_REPLACE')
+                          | group_by 10m, [value_cpu_mean: mean(value.target_recommendation)]
+                          | every 10m
+                          | group_by [cluster_name: resource.cluster_name, kind:metric.targetref_kind, controller_name:metric.targetref_name],
+                          		[recommendation: sum(value_cpu_mean)]
+                        ; hpa:
+                          fetch k8s_pod
+                          | metric 'custom.googleapis.com/podautoscaler/hpa/cpu/target_utilization'
+                          | filter 
+                              (resource.cluster_name == 'CLUSTER_TO_REPLACE')
+                          | group_by 10m, [value_cpu_mean: mean(value.target_utilization)]
+                          | every 10m
+                          | group_by [cluster_name: resource.cluster_name, kind:metric.targetref_kind, controller_name:metric.targetref_name],
+                          		[target: mean(value_cpu_mean)]
+                        }
+                        | outer_join [0],[0]
+                        | value [recommendation: vpa.recommendation + (if( gt(hpa.target,0),  vpa.recommendation * (100 - hpa.target) / 100,  cast_double(0) )) ]
+                        | group_by [cluster_name, controller_name], 
+                            [per_controler_name: cast_units(mean(recommendation),'{cpu}')]
+                    
+                    ; number_of_pods:
+                        fetch k8s_pod
+                        | metric 'kubernetes.io/pod/volume/total_bytes'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')
+                        | group_by 10m, [mean(val())]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, controller_name:metadata.system_labels.top_level_controller_name],
+                                [per_controller_name:count(val())]
+                    }
+                    | join
+                    | group_by [cluster_name, controller_name],
+                        [recommendation:sum(recommendation.per_controler_name * number_of_pods.per_controller_name)]
+                    | group_by [cluster_name, metric: 'recommended_cores'],
+                        [sum_value:sum(recommendation)]
+              }
+              | union
+        timeshiftDuration: 0s
+        yAxis:
+            label: y1Axis
+            scale: LINEAR
+    width: 6
+    height: 4
+  - widget:
+      title: 'Memory: Per cluster'
+      xyChart:
+        chartOptions:
+          mode: COLOR
+        dataSets:
+        - plotType: LINE
+          timeSeriesQuery:
+            timeSeriesQueryLanguage: |-   
+              { cluster_allocatable_bytes:
+                  {
+                    fetch k8s_node
+                    | metric 'kubernetes.io/node/memory/allocatable_bytes'
+                    | filter
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE')                    
+                    | group_by 10m, [value_allocatable_bytes_sum: mean(value.allocatable_bytes)]
+                    | every 10m
+                    | group_by [cluster_name:resource.cluster_name],
+                        [sum_value:sum(value_allocatable_bytes_sum)]
+                    ;
+                    fetch k8s_container
+                    | metric 'kubernetes.io/container/memory/request_bytes'
+                    | filter
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE')                    
+                    | group_by 10m, [value_request_bytes_sum: mean(value.request_bytes)]
+                    | every 10m
+                    | group_by [cluster_name:resource.cluster_name],
+                        [sum_hack:sum(value_request_bytes_sum)]
+                  }
+                  | join
+                  | group_by [cluster_name, metric:"allocatable_bytes"],
+                      [sum_value:sum(sum_value)]
+
+              ; cluster_request_bytes:
+                    fetch k8s_container
+                    | metric 'kubernetes.io/container/memory/request_bytes'
+                    | filter
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE')
+                    | group_by 10m, [value_request_bytes_mean: mean(value.request_bytes)]
+                    | every 10m
+                    | group_by [cluster_name: resource.cluster_name, metric: 'request_bytes'],
+                        [sum_value: sum(value_request_bytes_mean)]
+
+              ; cluster_used_bytes:
+                    fetch k8s_container
+                    | metric 'kubernetes.io/container/memory/used_bytes'
+                    | filter
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE')                  
+                    | filter (metric.memory_type = 'non-evictable')
+                    | group_by 10m, [value_used_bytes_mean: mean(value.used_bytes)]
+                    | every 10m
+                    | group_by [cluster_name: resource.cluster_name, metric: 'used_bytes'],
+                        [sum_value: sum(value_used_bytes_mean)]
+
+              ; cluster_recommended_bytes:
+                  {
+                    fetch k8s_container
+                    | metric 'custom.googleapis.com/podautoscaler/vpa/memory/target_recommendation'
+                    | filter
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE')                    
+                    | group_by 10m,
+                          [value_vpa_recommendation_mean: mean(value.target_recommendation)]
+                    | every 10m
+                    | group_by [cluster_name: resource.cluster_name, controller_name:metric.targetref_name],
+                          [vpa_recommendation_per_controller_name: cast_units(sum(value_vpa_recommendation_mean), "By")]
+                  ;
+                    fetch k8s_pod
+                    | metric 'kubernetes.io/pod/volume/total_bytes'
+                    | filter
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE')                    
+                    | group_by 10m, [mean(val())]
+                    | every 10m
+                    | group_by [cluster_name:resource.cluster_name, controller_name:metadata.system_labels.top_level_controller_name],
+                          [number_of_pods_per_controller_name:count(val())]
+                  }
+                  | join
+                  | group_by [cluster_name, controller_name],
+                      [vpa_recommendation:sum(val(0) * val(1))]
+                  | group_by [cluster_name, metric: 'recommended_bytes'],
+                      [sum_value:sum(vpa_recommendation)]
+              }
+              | union
+        timeshiftDuration: 0s
+        yAxis:
+          label: y1Axis
+          scale: LINEAR
+    width: 6
+    height: 4
+    xPos: 6
+  - widget:
+      title: 'CPU: Per node pool'
+      xyChart:
+        chartOptions:
+          mode: COLOR
+        dataSets:
+        - plotType: LINE
+          timeSeriesQuery:
+            timeSeriesQueryLanguage: |-
+                {nodepool_allocatable_cores:
+
+                    { node_allocatable_cores:
+                        fetch k8s_node
+                        | metric 'kubernetes.io/node/cpu/allocatable_cores'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                        
+                        | group_by 10m, [allocatable_cores:mean(value.allocatable_cores)]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:resource.node_name, nodepool:metadata.user_labels.c'cloud.google.com/gke-nodepool'], 
+                            [value:sum(allocatable_cores)]
+                    ; container_hack_to_compile:
+                        fetch k8s_container
+                        | metric 'kubernetes.io/container/cpu/request_cores'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                        
+                        | group_by 10m, [request_cores:mean(value.request_cores)]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name], 
+                            [value:sum(request_cores)]
+                    }
+                    | join
+                    | group_by [cluster_name, nodepool, metric:"allocatable_cores"], 
+                        [value:sum(node_allocatable_cores.value)]
+
+                ; nodepool_requested_cores:
+
+                    { node_hack_to_get_nodepool:
+                        fetch k8s_node
+                        | metric 'kubernetes.io/node/cpu/allocatable_cores'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                        
+                        | group_by 10m, [allocatable_cores:mean(value.allocatable_cores)]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:resource.node_name, nodepool:metadata.user_labels.c'cloud.google.com/gke-nodepool'], 
+                            [value:sum(allocatable_cores)]
+                    ; container_request_cores:
+                        fetch k8s_container
+                        | metric 'kubernetes.io/container/cpu/request_cores'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                        
+                        | group_by 10m, [request_cores:mean(value.request_cores)]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name], 
+                            [value:sum(request_cores)]
+                    }
+                    | join
+                    | group_by [cluster_name, nodepool, metric:"request_cores"], 
+                        [value:sum(container_request_cores.value)]
+
+                ; nodepool_used_cores:
+
+                    { node_hack_to_get_nodepool:
+                        fetch k8s_node
+                        | metric 'kubernetes.io/node/cpu/allocatable_cores'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                        
+                        | group_by 10m, [allocatable_cores:mean(value.allocatable_cores)]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:resource.node_name, nodepool:metadata.user_labels.c'cloud.google.com/gke-nodepool'], 
+                            [value:sum(allocatable_cores)]
+                    ; container_used_cores:
+                        fetch k8s_container
+                        | metric 'kubernetes.io/container/cpu/core_usage_time'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                        
+                        | align rate(10m)
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name], 
+                            [value: sum(value.core_usage_time)]
+                    }
+                    | join
+                    | group_by [cluster_name, nodepool, metric:"used_cores"], 
+                        [value:sum(container_used_cores.value)]    
+
+                ; nodepool_vpa_recommended_cores:
+
+                    { recommendation_per_controller_name:
+                    
+                        { vpa:
+                          fetch k8s_container
+                          | metric 'custom.googleapis.com/podautoscaler/vpa/cpu/target_recommendation'
+                          | filter 
+                              (resource.cluster_name == 'CLUSTER_TO_REPLACE')
+                          | group_by 10m, [value_cpu_mean: mean(value.target_recommendation)]
+                          | every 10m
+                          | group_by [cluster_name: resource.cluster_name, namespace_name: resource.namespace_name, kind:metric.targetref_kind, controller_name:metric.targetref_name],
+                          		[recommendation: sum(value_cpu_mean)]
+                        ; hpa:
+                          fetch k8s_pod
+                          | metric 'custom.googleapis.com/podautoscaler/hpa/cpu/target_utilization'
+                          | filter 
+                              (resource.cluster_name == 'CLUSTER_TO_REPLACE')
+                          | group_by 10m, [value_cpu_mean: mean(value.target_utilization)]
+                          | every 10m
+                          | group_by [cluster_name: resource.cluster_name, namespace_name: resource.namespace_name, kind:metric.targetref_kind, controller_name:metric.targetref_name],
+                          		[target: mean(value_cpu_mean)]
+                        }
+                        | outer_join [0],[0]
+                        | value [recommendation: vpa.recommendation + (if( gt(hpa.target,0),  vpa.recommendation * (100 - hpa.target) / 100,  cast_double(0) )) ]
+                        | group_by [cluster_name, namespace_name, controller_name], 
+                            [value: cast_units(mean(recommendation), '{cpu}')]
+                    
+                    ; number_of_pods_per_node_and_controller_name:
+
+                        { hack_to_get_nodepool:
+                            fetch k8s_node
+                            | metric 'kubernetes.io/node/cpu/allocatable_cores'
+                            | filter
+                                (resource.cluster_name == 'CLUSTER_TO_REPLACE')
+                            | group_by 10m, [allocatable_cores:mean(value.allocatable_cores)]
+                            | every 10m
+                            | group_by [cluster_name:resource.cluster_name, node_name:resource.node_name, nodepool:metadata.user_labels.c'cloud.google.com/gke-nodepool'], 
+                                [value:sum(allocatable_cores)]
+
+                        ; number_of_pods_per_controller_name:
+                            fetch k8s_pod
+                            | metric 'kubernetes.io/pod/volume/total_bytes'
+                            | filter
+                                (resource.cluster_name == 'CLUSTER_TO_REPLACE')                            
+                            | group_by 10m, [pod_entry:mean(value.total_bytes)]
+                            | every 10m
+                            | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name, namespace_name: resource.namespace_name, controller_name:metadata.system_labels.top_level_controller_name],
+                                    [value:count(pod_entry)]
+                        }
+                        | join
+                        | group_by [cluster_name, nodepool, node_name, namespace_name, controller_name],
+                            [value:sum(number_of_pods_per_controller_name.value)]
+                    }
+                    | join
+                    | group_by [cluster_name, nodepool, node_name, namespace_name, controller_name],
+                        [recommendation_per_node_and_controller_name:sum(recommendation_per_controller_name.value * number_of_pods_per_node_and_controller_name.value)]
+                    | group_by [cluster_name, nodepool, metric: 'recommended_cores'],
+                        [value:sum(recommendation_per_node_and_controller_name)]            
+                }
+                | union
+        timeshiftDuration: 0s
+        yAxis:
+          label: y1Axis
+          scale: LINEAR
+    width: 4
+    height: 4
+    yPos: 4
+  - widget:
+      title: 'Memory: Per node pool'
+      xyChart:
+        chartOptions:
+          mode: COLOR
+        dataSets:
+        - plotType: LINE
+          timeSeriesQuery:
+            timeSeriesQueryLanguage: |-
+              { nodepool_allocatable_bytes:
+
+                  { node_allocatable_bytes:
+                        fetch k8s_node
+                        | metric 'kubernetes.io/node/memory/allocatable_bytes'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                         
+                        | group_by 10m, [allocatable_bytes:mean(value.allocatable_bytes)]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:resource.node_name, nodepool:metadata.user_labels.c'cloud.google.com/gke-nodepool'], 
+                            [value:sum(allocatable_bytes)]
+                  ; container_hack_to_compile:
+                        fetch k8s_container
+                        | metric 'kubernetes.io/container/memory/request_bytes'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')   
+                        | group_by 10m, [request_bytes:mean(value.request_bytes)]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name], 
+                            [value:sum(request_bytes)]
+                  }
+                  | join
+                  | group_by [cluster_name, nodepool, metric:"allocatable_bytes"], 
+                        [value:cast_double(sum(node_allocatable_bytes.value))]
+
+              ; nodepool_request_bytes:
+                  
+                  { node_hack_to_get_nodepool:
+                        fetch k8s_node
+                        | metric 'kubernetes.io/node/memory/allocatable_bytes'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')   
+                        | group_by 10m, [allocatable_bytes:mean(value.allocatable_bytes)]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:resource.node_name, nodepool:metadata.user_labels.c'cloud.google.com/gke-nodepool'], 
+                            [value:sum(allocatable_bytes)]
+                  ; container_request_bytes:
+                        fetch k8s_container
+                        | metric 'kubernetes.io/container/memory/request_bytes'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                         
+                        | group_by 10m, [request_bytes:mean(value.request_bytes)]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name], 
+                            [value:sum(request_bytes)]
+                  }
+                  | join
+                  | group_by [cluster_name, nodepool, metric:"request_bytes"],
+                      [value:cast_double(sum(container_request_bytes.value))]
+
+              ; nodepool_used_bytes:
+
+                  { node_hack_to_get_nodepool:
+                        fetch k8s_node
+                        | metric 'kubernetes.io/node/memory/allocatable_bytes'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                         
+                        | group_by 10m, [allocatable_bytes:mean(value.allocatable_bytes)]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:resource.node_name, nodepool:metadata.user_labels.c'cloud.google.com/gke-nodepool'], 
+                            [value:sum(allocatable_bytes)]
+                  ; container_used_bytes:
+                        fetch k8s_container
+                        | metric 'kubernetes.io/container/memory/used_bytes'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                         
+                        | filter (metric.memory_type = 'non-evictable')
+                        | group_by 10m, [used_bytes: mean(value.used_bytes)]
+                        | every 10m
+                        | group_by [cluster_name: resource.cluster_name, node_name:metadata.system_labels.node_name], 
+                            [value: sum(used_bytes)]
+                  }
+                  | join
+                  | group_by [cluster_name, nodepool, metric: 'used_bytes'], 
+                      [value:sum(container_used_bytes.value)]    
+
+              ; nodepool_vpa_recommended_bytes:
+
+                  { recommendation_per_controller_name:
+                        fetch k8s_container
+                        | metric 'custom.googleapis.com/podautoscaler/vpa/memory/target_recommendation'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                         
+                        | group_by 10m,
+                                [value_vpa_recommendation_mean: mean(value.target_recommendation)]
+                        | every 10m
+                        | group_by [cluster_name: resource.cluster_name, controller_name:metric.targetref_name],
+                                [value: cast_units(sum(value_vpa_recommendation_mean), "By")]
+                  
+                  ; number_of_pods_per_node_and_controller_name:
+
+                        { node_hack_to_get_nodepool:
+                            fetch k8s_node
+                            | metric 'kubernetes.io/node/memory/allocatable_bytes'
+                            | filter
+                                (resource.cluster_name == 'CLUSTER_TO_REPLACE')                               
+                            | group_by 10m, [allocatable_bytes:mean(value.allocatable_bytes)]
+                            | every 10m
+                            | group_by [cluster_name:resource.cluster_name, node_name:resource.node_name, nodepool:metadata.user_labels.c'cloud.google.com/gke-nodepool'], 
+                                [value:sum(allocatable_bytes)]
+                      
+                        ; number_of_pods_per_controller_name:
+                            fetch k8s_pod
+                            | metric 'kubernetes.io/pod/volume/total_bytes'
+                            | filter
+                                (resource.cluster_name == 'CLUSTER_TO_REPLACE')                               
+                            | group_by 10m, [pod_entry:mean(value.total_bytes)]
+                            | every 10m
+                            | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name, controller_name:metadata.system_labels.top_level_controller_name],
+                                    [value:count(pod_entry)]
+                        }
+                        | join
+                        | group_by [cluster_name, nodepool, node_name, controller_name],
+                            [value:sum(number_of_pods_per_controller_name.value)]
+                  }
+                  | join
+                  | group_by [cluster_name, nodepool, node_name, controller_name],
+                      [recommendation_per_node_and_controller_name:sum(recommendation_per_controller_name.value * number_of_pods_per_node_and_controller_name.value)]
+                  | group_by [cluster_name, nodepool, metric: 'recommended_bytes'],
+                      [value:sum(recommendation_per_node_and_controller_name)]  
+              }
+              | union
+        timeshiftDuration: 0s
+        yAxis:
+          label: y1Axis
+          scale: LINEAR
+    width: 4
+    height: 4
+    xPos: 4
+    yPos: 4
+  - widget:
+      title: 'Number of Pods: Per node pool'
+      xyChart:
+        chartOptions:
+          mode: COLOR
+        dataSets:
+        - plotType: LINE
+          timeSeriesQuery:
+            timeSeriesQueryLanguage: |-
+              {nodepool_max_pods:
+                {
+                    {
+                        fetch k8s_node
+                        | metric 'kubernetes.io/node/memory/allocatable_bytes'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                        
+                        | group_by 10m, [mean(val())]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:resource.node_name, nodepool:metadata.user_labels.c'cloud.google.com/gke-nodepool'], 
+                            sum(val())
+                    ;
+                        fetch k8s_container
+                        | metric 'kubernetes.io/container/memory/request_bytes'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                        
+                        | group_by 10m, [mean(val())]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name], 
+                            sum(val())
+                    }
+                    | join
+                    | group_by [cluster_name, nodepool, node_name], 
+                        [value:sum(val(1))]
+                ;
+                    fetch k8s_pod
+                    | metric 'kubernetes.io/pod/volume/total_bytes'
+                    | filter
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE')                    
+                    | group_by 10m, [mean(val())]
+                    | every 10m
+                    | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name], 
+                        [number_of_pods_per_node:count(val())]
+                }
+                | join
+                | group_by [cluster_name, nodepool, metric:'max_pods'],
+                    [number_of_pods:cast_double(max(number_of_pods_per_node))]
+
+              ;nodepool_avg_pods:
+                {
+                    {
+                        fetch k8s_node
+                        | metric 'kubernetes.io/node/memory/allocatable_bytes'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                        
+                        | group_by 10m, [mean(val())]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:resource.node_name, nodepool:metadata.user_labels.c'cloud.google.com/gke-nodepool'], 
+                            sum(val())
+                    ;
+                        fetch k8s_container
+                        | metric 'kubernetes.io/container/memory/request_bytes'
+                        | filter
+                            (resource.cluster_name == 'CLUSTER_TO_REPLACE')                        
+                        | group_by 10m, [mean(val())]
+                        | every 10m
+                        | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name], 
+                            sum(val())
+                    }
+                    | join
+                    | group_by [cluster_name, nodepool, node_name], 
+                        [value:sum(val(1))]
+                ;
+                    fetch k8s_pod
+                    | metric 'kubernetes.io/pod/volume/total_bytes'
+                    | filter
+                        (resource.cluster_name == 'CLUSTER_TO_REPLACE')                    
+                    | group_by 10m, [mean(val())]
+                    | every 10m
+                    | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name], 
+                        [number_of_pods_per_node:count(val())]
+                }
+                | join
+                | group_by [cluster_name, nodepool, metric:'avg_pods'],
+                    [number_of_pods:cast_double(mean(number_of_pods_per_node))]
+              }
+              | union
+        timeshiftDuration: 0s
+        yAxis:
+          label: y1Axis
+          scale: LINEAR
+    width: 4
+    height: 4
+    xPos: 8
+    yPos: 4

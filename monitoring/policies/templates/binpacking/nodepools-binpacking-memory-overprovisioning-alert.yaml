@@ -1,0 +1,86 @@
+# Copyright 2021 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+combiner: OR
+conditions:
+- conditionMonitoringQueryLanguage:
+    duration: 84600s #1 day
+    #duration: 60s    #1 minute 
+    query: |-
+      { nodepool_allocatable_bytes:
+
+          { node_allocatable_bytes:
+              fetch k8s_node
+              | metric 'kubernetes.io/node/memory/allocatable_bytes'
+              | filter
+                  (resource.cluster_name == 'CLUSTER_TO_REPLACE')              
+              | group_by 10m, [allocatable_bytes:mean(value.allocatable_bytes)]
+              | every 10m
+              | group_by [cluster_name:resource.cluster_name, node_name:resource.node_name, nodepool:metadata.user_labels.c'cloud.google.com/gke-nodepool'], 
+                  [value:sum(allocatable_bytes)]
+          ; container_hack_to_compile:
+              fetch k8s_container
+              | metric 'kubernetes.io/container/memory/request_bytes'
+              | filter
+                  (resource.cluster_name == 'CLUSTER_TO_REPLACE')              
+              | group_by 10m, [request_bytes:mean(value.request_bytes)]
+              | every 10m
+              | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name], 
+                  [value:sum(request_bytes)]
+          }
+          | join
+          | group_by [cluster_name, nodepool], 
+                [value:cast_double(sum(node_allocatable_bytes.value))]
+
+      ; nodepool_request_bytes:
+          
+          { node_hack_to_get_nodepool:
+              fetch k8s_node
+              | metric 'kubernetes.io/node/memory/allocatable_bytes'
+              | filter
+                  (resource.cluster_name == 'CLUSTER_TO_REPLACE')              
+              | group_by 10m, [allocatable_bytes:mean(value.allocatable_bytes)]
+              | every 10m
+              | group_by [cluster_name:resource.cluster_name, node_name:resource.node_name, nodepool:metadata.user_labels.c'cloud.google.com/gke-nodepool'], 
+                  [value:sum(allocatable_bytes)]
+          ; container_request_bytes:
+              fetch k8s_container
+              | metric 'kubernetes.io/container/memory/request_bytes'
+              | filter
+                  (resource.cluster_name == 'CLUSTER_TO_REPLACE')              
+              | group_by 10m, [request_bytes:mean(value.request_bytes)]
+              | every 10m
+              | group_by [cluster_name:resource.cluster_name, node_name:metadata.system_labels.node_name], 
+                  [value:sum(request_bytes)]
+          }
+          | join
+          | group_by [cluster_name, nodepool],
+              [value:cast_double(sum(container_request_bytes.value))]
+
+      }
+      | join
+      | value
+          [nodepool_overprovisioning_perc:
+            cast_units(100 - (100 * nodepool_request_bytes.value / nodepool_allocatable_bytes.value), '%')]
+      | window 10m
+      | condition nodepool_overprovisioning_perc > cast_units(40, '%')
+    trigger:
+      count: 1
+  displayName: 'NODEPOOL MEMORY OVER-PROVISIONED BY 40%'
+displayName: 'NODEPOOL BIN PACKING: MEMORY OVER-PROVISIONING ALERT (CLUSTER_TO_REPLACE)'
+documentation:
+  content: |
+    You can see Allocable vs Requested information in **Cloud Monitoring -> Dashboards -> GKE - Cluster Bin Packing (CLUSTER_TO_REPLACE)** 
+  mimeType: text/markdown
+enabled: true
