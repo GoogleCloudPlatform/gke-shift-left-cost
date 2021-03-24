@@ -1,0 +1,3 @@
+k8s/*.yaml
+monitoring/dashboards/*.yaml
+monitoring/policies/*.yaml

@@ -156,7 +156,7 @@ mosaicLayout:
 
 
   - widget:
-      title: 'CPU: Top 5 over-provisioned apps'
+      title: 'CPU: Top 5 over-provisioned apps (in cores)'
       xyChart:
         chartOptions:
           mode: COLOR
@@ -221,7 +221,8 @@ mosaicLayout:
 
                 }
                 | join
-                | value [app_overprovisioned_perc:cast_units(100 - (100 * namespace_recommended_cores.value / namespace_request_cores.value), '%')]
+                #| value [app_overprovisioned_perc:cast_units(100 - (100 * namespace_recommended_cores.value / namespace_request_cores.value), '%')]
+                | value [app_overprovisioned_in_num_cores:namespace_request_cores.value - namespace_recommended_cores.value]
                 | top 5
         timeshiftDuration: 0s
         yAxis:
@@ -232,7 +233,7 @@ mosaicLayout:
     yPos: 4
 
   - widget:
-      title: 'Memory: Top 5 over-provisioned apps'
+      title: 'Memory: Top 5 over-provisioned apps (in bytes)'
       xyChart:
         chartOptions:
           mode: COLOR
@@ -282,7 +283,8 @@ mosaicLayout:
 
                 }
                 | join
-                | value [app_overprovisioned_perc:cast_units(100 - (100 * namespace_recommended_bytes.value / namespace_request_bytes.value), '%')]
+                #| value [app_overprovisioned_perc:cast_units(100 - (100 * namespace_recommended_bytes.value / namespace_request_bytes.value), '%')]
+                | value [app_overprovisioned_in_bytes:namespace_request_bytes.value - namespace_recommended_bytes.value]
                 | top 5
         timeshiftDuration: 0s
         yAxis:
@@ -295,7 +297,7 @@ mosaicLayout:
 
 
   - widget:
-      title: 'CPU: Top 5 under-provisioned apps'
+      title: 'CPU: Top 5 under-provisioned apps (%)'
       xyChart:
         chartOptions:
           mode: COLOR
@@ -372,7 +374,7 @@ mosaicLayout:
     yPos: 8
 
   - widget:
-      title: 'Memory: Top 5 under-provisioned apps'
+      title: 'Memory: Top 5 under-provisioned apps (%)'
       xyChart:
         chartOptions:
           mode: COLOR
