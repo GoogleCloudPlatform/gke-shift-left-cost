@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.14-alpine as builder
+FROM golang:1.15-alpine as builder
 WORKDIR /go/src/vpa-metrics-extporter
 COPY . .
 RUN go build -o /export .

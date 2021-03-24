@@ -559,7 +559,7 @@ mosaicLayout:
 
 
   - widget:
-      title: 'Men: {{$controllerName}} (p/ Pod)'
+      title: 'Mem: {{$controllerName}} (p/ Pod)'
       xyChart:
         chartOptions:
           mode: COLOR

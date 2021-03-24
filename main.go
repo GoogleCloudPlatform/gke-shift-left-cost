@@ -38,11 +38,18 @@ func init() {
 
 	level, err := log.ParseLevel(*verbosity)
 	exitOnError("Invalid 'verbose' parameter", err)
+	log.SetFormatter(&log.JSONFormatter{
+		DisableTimestamp: true,
+		FieldMap: log.FieldMap{
+			log.FieldKeyLevel: "severity",
+		},
+	})
+	log.SetOutput(os.Stdout)
 	log.SetLevel(level)
 }
 
 func main() {
-	log.Infof("************** VPA METRICS EXPORTER STARTED (version %s) **************", version)
+	log.Infof("************** METRICS EXPORTER STARTED (version %s) **************", version)
 
 	now := time.Now().Format(time.RFC3339)
 
@@ -55,7 +62,7 @@ func main() {
 	err := mon.ExportMetrics(tsList)
 	exitOnError("Failed to instantiate cloud monitoring object", err)
 
-	log.Infof("************** VPA METRICS EXPORTER FINISHED *************")
+	log.Infof("************** METRICS EXPORTER FINISHED *************")
 }
 
 func retrieveVPAs() []k8s.VPA {
