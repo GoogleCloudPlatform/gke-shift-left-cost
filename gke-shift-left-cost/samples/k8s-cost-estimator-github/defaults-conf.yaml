@@ -1,0 +1,7 @@
+deploymentConf:
+  defaultCPUinMillis: 250
+  defaultMemoryinBytes: 64000000
+  percentageIncreaseForUnboundedRerouces: 200
+resourceConf:
+  machineFamily: E2
+  region: us-central1

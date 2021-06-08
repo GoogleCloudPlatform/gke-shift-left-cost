@@ -1,0 +1,8 @@
+bin/
+ssh/
+credentials.json
+github-output.json
+github-output.diff
+gitlab-output.json
+gitlab-output.diff
+markdown-output.md
