@@ -11,6 +11,8 @@ workflow:
 estimate-cost: 
   tags: 
     - "k8s-cost-estimator-runner"
+  variables:
+    K8S_DIRECTORY: wordpress # cost-estimator needs a path where the yaml manifests can be found. both .yaml and .yml are valid suffixes, and it will also check into subdirectories.
   script: |
     set -e
 
@@ -19,17 +21,17 @@ estimate-cost:
     echo "** Checking out '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME' branch ..."
     echo "*************************************************************************"
     git config --global user.email "GITLAB_EMAIL" && git config --global user.name "GITLAB_USER"
-    mkdir previous
-    git clone https://gitlab.com/GITLAB_USER/k8s-cost-estimator-gitlab.git previous/
-    cd previous
+    mkdir ../previous
+    git clone ${CI_REPOSITORY_URL} ../previous/
+    cd ../previous
     git checkout $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
-    cd ..
+    cd ${CI_PROJECT_DIR}
 
     echo ""
     echo "*************************************************************************"
     echo "** Estimating cost difference between current and previous versions..."
     echo "*************************************************************************"
-    k8s-cost-estimator --k8s wordpress --k8s-prev previous/wordpress --output output.json --environ=GITLAB
+    k8s-cost-estimator --k8s ./${K8S_DIRECTORY} --k8s-prev previous/${K8S_DIRECTORY} --output output.json --environ=GITLAB
 
     echo ""
     echo "***************************************************************************************************************"
@@ -50,7 +52,7 @@ estimate-cost:
       fi
     }
 
-    comments_url="https://gitlab.com/api/v4/projects/$CI_MERGE_REQUEST_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
+    comments_url="${CI_SERVER_URL}/api/v4/projects/$CI_MERGE_REQUEST_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
     comments_body="$(cat output.json)"
     createObject $comments_url "$comments_body"
     
@@ -61,7 +63,7 @@ estimate-cost:
         echo "****************************************************************************************"
         echo "** Possible cost increase bigger than \$$GITLAB_FINOPS_COST_USD_THRESHOLD USD detected. Requesting FinOps approval ..."
         echo "****************************************************************************************"    
-        reviewers_url="https://gitlab.com/api/v4/projects/$CI_MERGE_REQUEST_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/approval_rules"
+        reviewers_url="${CI_SERVER_URL}/api/v4/projects/$CI_MERGE_REQUEST_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/approval_rules"
         reviewers_body="{\"name\":\"Require FinOps Approval\", \"approvals_required\":1, \"user_ids\":[$GITLAB_FINOPS_REVIEWER_ID]}"
         createObject $reviewers_url "$reviewers_body"
       else
