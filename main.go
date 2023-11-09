@@ -35,7 +35,7 @@ var (
 	k8sPrevPath = flag.String("k8s-prev", "", "Optional. Path to the previous K8s manifests folder. Useful to compare prices.")
 	outputFile  = flag.String("output", "", "Optional. Output file path. If not provided, console is used")
 	environ     = flag.String("environ", "LOCAL", "Optional. Where your code is running at. Used to know determine the output file format: GITHUB | GITLAB | LOCAL")
-	authKey     = flag.String("auth-key", "", "Optional. The GCP service account JOSN key filepath. If not provided, default service account is used (Run 'gcloud auth application-default login' to set your user as the default service account)")
+	authKey     = flag.String("auth-key", "", "Optional. The GCP service account JSON key filepath. If not provided, default service account is used (Run 'gcloud auth application-default login' to set your user as the default service account)")
 	configFile  = flag.String("config", "", "Optional. The defaults configuration YAML filepath to set: machine family, region and compute resources not provided in k8s manifests")
 	verbosity   = flag.String("v", "panic", "Optional. Verbosity: panic|fatal|error|warn|info|debug|trace. Default panic")
 )
