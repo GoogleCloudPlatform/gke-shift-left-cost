@@ -1,4 +1,9 @@
-# Estimate your GKE costs early in the development cycle
+# Archived
 
-- [Estimate your GKE costs early in the development cycle using Github](https://cloud.google.com/architecture/estimate-gke-costs-early-using-github)
-- [Estimate your GKE costs early in the development cycle using Gitlab](https://cloud.google.com/architecture/estimate-gke-costs-early-using-gitlab)
+This repository has been archived. Please see the
+[Google Kubernetes Engine (GKE) Samples repository](https://github.com/GoogleCloudPlatform/kubernetes-engine-samples/tree/main/cost-optimization/gke-shift-left-cost)
+instead.
+
+## Disclaimer
+
+This is not an officially supported Google product.
