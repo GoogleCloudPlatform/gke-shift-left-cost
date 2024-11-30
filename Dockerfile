@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.15.1-alpine3.12 AS builder
+FROM golang:1.22.1-alpine3.19 AS builder
 WORKDIR /app
 # Install dependencies in go.mod and go.sum
 COPY go.mod go.sum ./
@@ -23,12 +23,12 @@ COPY . ./
 RUN go build -mod=readonly -v -o /k8s-cost-estimator
 
 
-FROM alpine:3.12
+FROM alpine:3.19.1
 WORKDIR /app
 # Install utilities needed durin ci/cd process
-RUN apk update && apk upgrade && \
-    apk add --no-cache bash git curl jq && \
-    rm /var/cache/apk/*
+RUN apk upgrade --no-cache && \
+    apk add --no-cache bash git curl jq 
+
 # copy applicatrion binary
 COPY --from=builder /k8s-cost-estimator /usr/local/bin/k8s-cost-estimator
 #ENTRYPOINT ["k8s-cost-estimator"]
